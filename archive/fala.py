@@ -20,31 +20,20 @@ import numpy as np
 # Learning setup
 #---------------
 
-#nParams=14                  # number of controller parameters that need tuning
-#nOptions=10                 # number of options per controller (assume all =)
-#optionsInterval=[0.1,2]     # range for parameters
-#learnRate=0.15              # learning rate (<1)
-#trialLen=3                  # lenght of each trial 
-#doLearn = 0                 # 1 = yes, 0 = no
+nParams=14                  # number of controller parameters that need tuning
+nOptions=10                 # number of options per controller (assume all =)
+optionsInterval=[0.1,2]     # range for parameters
+learnRate=0.15              # learning rate (<1)
+trialLen=3                  # lenght of each trial 
+doLearn = 0                 # 1 = yes, 0 = no
 
 class falaObj:
     
-    def __init__(self,config):
+    def __init__(self):
         
         # dev note: right now optionsInterval only accepts one interval [a,b]
         #   later, this should be expanded to pass different intervals 
         #   for each parameter
-        
-        # break out the learning stuff
-        nParams = config.nParams
-        nOptions = config.nOptions
-        optionsInterval = config.optionsInterval 
-        learnRate = config.learnRate
-        trialLen = config.trialLen
-        doLearn = config.doLearn
-        nVeh = config.nVeh
-        configa = config.a
-        configb = config.b
         
         #attributes
         self.nParams = nParams                              # how many parameters are being tuned
@@ -57,10 +46,9 @@ class falaObj:
         self.error_pos    = np.zeros(3)
         self.error_vel   = np.zeros(3)
         self.trialLen = trialLen
-        #self.trialCounter = 0 
+        self.trialCounter = 0 
         self.error_accumulated = 0.0
         self.doLearn = doLearn
-        self.nVeh = nVeh
         
         # initialize attributes used to compute reward
         self.costMin = 1000000     # the minimum observed cost thus far (persistent valriable, start high)
@@ -75,22 +63,17 @@ class falaObj:
         #initialize attributes used to update the Qtable
         self.learnRate = learnRate
         self.probLimit = 1       # maximum probabillity (default 1, related to exploit vs explore)
-        self.a = configa               # weight of positive reinforcement (default one)
-        self.b = configb               # weight of negative reinforcement (default zero)
+        self.a = 1               # weight of positive reinforcement (default one)
+        self.b = 0               # weight of negative reinforcement (default zero)
         self.pVector=np.zeros((1,self.nParams))
         self.pVector[0,:]=self.Qtable[0,:]        # initialize pVector using first row of Q table
         self.selectedIndex=np.zeros((1,self.nParams),dtype=int) 
         self.selectedVals=np.zeros((1,self.nParams))
         self.selectedVals[0,:]=self.optionsTable[0,:]
         
-        
-        #travis new idea
-        self.trialCounter2 = 0
-        self.flag = 0
-        self.learnWhat = config.learnWhat
-        
-        #print('FALA Object created')
-        #print('FALA Object has ',nParams, ' parameters, each with ',nOptions,' options')
+    
+        print('FALA Object created')
+        print('FALA Object has ',nParams, ' parameters, each with ',nOptions,' options')
         #print('Options Table:',self.OptionsTable)
         
         
@@ -150,11 +133,9 @@ class falaObj:
             # randomly select an option according to the current distribution in the Q table
             self.selectedIndex[0,i] = (np.cumsum(self.Qtable[:,i]) >= np.random.random()).argmax()
             # selected value cooresponding to that index
-            ### self.selectedVals[0,i] = self.optionsTable[self.selectedIndex[0,i],0]
-            self.selectedVals[0,i] = self.optionsTable[self.selectedIndex[0,i],i] # Travis I think this was the source of the duplicate Qtable error
+            self.selectedVals[0,i] = self.optionsTable[self.selectedIndex[0,i],0]
             # build a new vector composed of the corresponding probabilities 
-            #### self.pVector[0,i]=self.Qtable[self.selectedIndex[0,i],0]
-            self.pVector[0,i]=self.Qtable[self.selectedIndex[0,i],i] # Travis I think this was the source of same duplicated Qtable error
+            self.pVector[0,i]=self.Qtable[self.selectedIndex[0,i],0]
             #Return the parameters
         
         return self.selectedVals.transpose().ravel()
@@ -167,9 +148,8 @@ class falaObj:
         
             # Compute error for learning (using last timestep's params)
             self.computeError(quad,traj)
-            #self.trialCounter += Ts/self.nVeh
-            #if self.trialCounter > self.trialLen: #if the trial is over (remember # of vehicles matters)
-            if t > traj.t_wps[int(self.trialCounter2)+1]: #if the trial is over (remember # of vehicles matters)
+            self.trialCounter += Ts
+            if self.trialCounter > self.trialLen: #if the trial is over
                 # compute the reward signal
                 self.computeReward(self.error_accumulated)
                 # update the probabilities
@@ -177,55 +157,18 @@ class falaObj:
                 # update tuning parameters from fala (for next iteration)
                 selPars = self.getParams()
                 # send tuning parameters to controller (for next iteration)
-                ctrl.tune(selPars, self.learnWhat)
+                ctrl.tune(selPars)
                 #print
-                #print('Trial completed: ', t)
-                #print(self.pVector)
-                #print('Err Acc/Avg: ', self.error_accumulated/self.costAvg, 'reward: ', self.reward  )
-                #print('Accumulated Error = ', )
+                print('Trial completed: ', t)
                 #print('Trial completed at ', t, 'secs,',' max prob = ',np.amax(self.Qtable,axis=0))
                 #print('selected values: ',self.selectedVals)
                 #print('reward signal: ',self.reward)
                 #print('error = ',self.error_accumulated)
                 # reset counter
-                #self.trialCounter = 0
-                #self.trialCounter = Ts
+                self.trialCounter = 0
                 # reset accumulated error
-                print(t)
-                print(self.Qtable)
-                self.error_accumulated = 0
-                self.trialCounter2 += 1
-                if np.amin(np.amax(self.Qtable, 0)) > 0.1 and self.flag == 0:
-                    print('10 percent done at', t, 'sec')
-                    self.flag += 1
-                if np.amin(np.amax(self.Qtable, 0)) > 0.2 and self.flag == 1:
-                    print('20 percent done at', t, 'sec')
-                    self.flag += 1
-                if np.amin(np.amax(self.Qtable, 0)) > 0.3 and self.flag == 2:
-                    print('30 percent done at', t, 'sec')
-                    self.flag += 1
-                if np.amin(np.amax(self.Qtable, 0)) > 0.4 and self.flag == 3:
-                    print('40 percent done at', t, 'sec')
-                    self.flag += 1
-                if np.amin(np.amax(self.Qtable, 0)) > 0.5 and self.flag == 4:
-                    print('50 percent done at', t, 'sec')
-                    self.flag += 1
-                if np.amin(np.amax(self.Qtable, 0)) > 0.6 and self.flag == 5:
-                    print('60 percent done at', t, 'sec')
-                    self.flag += 1
-                if np.amin(np.amax(self.Qtable, 0)) > 0.7 and self.flag == 6:
-                    print('70 percent done at', t, 'sec')
-                    self.flag += 1
-                if np.amin(np.amax(self.Qtable, 0)) > 0.8 and self.flag == 7:
-                    print('80 percent done at', t, 'sec')
-                    self.flag += 1
-                if np.amin(np.amax(self.Qtable, 0)) > 0.9 and self.flag == 8:
-                    print('90 percent done at', t, 'sec')
-                    self.flag += 1
-                if np.amin(np.amax(self.Qtable, 0)) > 0.95 and self.flag == 9:
-                    print('95 percent done at', t, 'sec')
-                    self.flag += 1
-        
+                self.error_accumulated = 0   
+       
         
 
 
